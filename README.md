@@ -15,3 +15,5 @@ Liberally takes ideas from
 - This implements complete list of (current) cassandra thrift commands.
 
 - ```CQL``` commands can be sent using the ```execute_cql_command```, ```prepare_cql_command```, and ```execute_prepared_cql_command``` metnds
+
+- pools are garbage-collected when  the keyspace is deleted (or the application is restarted)

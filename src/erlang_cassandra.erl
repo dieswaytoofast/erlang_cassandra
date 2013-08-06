@@ -30,10 +30,6 @@
 -export([registered_pool_name/1]).
 -export([get_target/1]).
 
-%% Cassandra Methods
--export([column_parent/1, column_parent/2]).
--export([slice/2, slice/3]).
-
 -export([set_keyspace/1, set_keyspace/2]).
 -export([describe_keyspace/1, describe_keyspace/2]).
 -export([system_add_keyspace/1, system_add_keyspace/2]).
@@ -44,9 +40,10 @@
 -export([get/4]).
 -export([remove/5]).
 
--export([system_add_column_family/2]).
+-export([system_add_column_family/1, system_add_column_family/2]).
+-export([system_describe_column_family/2]).
 -export([system_drop_column_family/2]).
--export([system_update_column_family/2]).
+-export([system_update_column_family/1, system_update_column_family/2]).
 -export([truncate/2]).
 
 -export([add/5]).
@@ -69,6 +66,17 @@
 -export([describe_keyspaces/0, describe_keyspaces/1]).
 -export([describe_cluster_name/0, describe_cluster_name/1]).
 -export([describe_ring/1, describe_ring/2]).
+
+%% Helpers
+-export([timestamp/0]).
+%% Cassandra Records
+-export([column_path/3]).
+-export([column_parent/1, column_parent/2]).
+-export([column/4]).
+-export([counter_column/2]).
+-export([column_family_definition/2, column_family_definition/3]).
+-export([keyspace_definition/1, keyspace_definition/2]).
+-export([slice_predicate/3, slice_predicate/4]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -168,26 +176,6 @@ stop_pool(PoolName) ->
     erlang_cassandra_poolboy_sup:stop_pool(PoolName).
 
 
-%% Erlang_Cassandra
-column_parent(ColumnFamily) ->
-    #columnParent{column_family = ColumnFamily}.
-
-column_parent(SuperColumn, ColumnFamily) ->
-    #columnParent{super_column = SuperColumn,
-                  column_family = ColumnFamily}.
-
-%% @doc Create a slice_range object for slice queries
-%% @end
--spec slice(slice_start(), slice_end(), slice_count()) -> slice_predicate().
-slice(Start, End) ->
-    slice(Start, End, ?DEFAULT_SLICE_COUNT).
-slice(Start, End, Count) ->
-    Range = #sliceRange{start = Start, 
-                        finish = End, 
-                        count = Count},
-    #slicePredicate{slice_range = Range,
-                    column_names = undefined}.
-
 %% @doc Set the keyspace to be used by the connection
 -spec set_keyspace(keyspace()) -> response().
 set_keyspace(Keyspace) ->
@@ -209,8 +197,7 @@ describe_keyspace(ServerRef, Keyspace) ->
 %% @doc Add a keyspace
 -spec system_add_keyspace(keyspace_definition()) -> response().
 system_add_keyspace(KeyspaceDefinition) ->
-    Keyspace = KeyspaceDefinition#ksDef.name,
-    system_add_keyspace(Keyspace, KeyspaceDefinition).
+    system_add_keyspace(?DEFAULT_POOL_NAME, KeyspaceDefinition).
 
 -spec system_add_keyspace(server_ref(), keyspace_definition()) -> response().
 system_add_keyspace(ServerRef, KeyspaceDefinition) ->
@@ -229,11 +216,13 @@ system_update_keyspace(ServerRef, KeyspaceDefinition) ->
 %% @doc Remove a keyspace
 -spec system_drop_keyspace(keyspace()) -> response().
 system_drop_keyspace(Keyspace) ->
-    system_drop_keyspace(Keyspace, Keyspace).
+    system_drop_keyspace(?DEFAULT_POOL_NAME, Keyspace).
 
 -spec system_drop_keyspace(server_ref(), keyspace()) -> response().
 system_drop_keyspace(ServerRef, Keyspace) ->
-    route_call(ServerRef, {system_drop_keyspace, Keyspace}, ?POOL_TIMEOUT).
+    Response = route_call(ServerRef, {system_drop_keyspace, Keyspace}, ?POOL_TIMEOUT),
+    stop_pool(Keyspace),
+    Response.
 
 %% @doc Insert a column
 -spec insert(server_ref(), row_key(), column_parent(), column(), consistency_level()) -> response().
@@ -253,22 +242,44 @@ remove(ServerRef, RowKey, ColumnPath, ColumnTimestamp, ConsistencyLevel) ->
     route_call(ServerRef, {remove, RowKey, ColumnPath, ColumnTimestamp, 
                            ConsistencyLevel}, ?POOL_TIMEOUT).
 
-%% @doc Add a column fmaily
+%% @doc Add a column family
+-spec system_add_column_family(column_family_definition()) -> response().
+system_add_column_family(ColumnFamilyDefinition) ->
+    Keyspace = ColumnFamilyDefinition#cfDef.keyspace,
+    route_call(Keyspace, {system_add_column_family, ColumnFamilyDefinition}, ?POOL_TIMEOUT).
+
 -spec system_add_column_family(server_ref(), column_family_definition()) -> response().
 system_add_column_family(ServerRef, ColumnFamilyDefinition) ->
     route_call(ServerRef, {system_add_column_family, ColumnFamilyDefinition}, ?POOL_TIMEOUT).
 
-%% @doc Add a column fmaily
+%% @doc Get the column family definition
+-spec system_describe_column_family(keyspace(), column_family()) -> response().
+system_describe_column_family(Keyspace, ColumnFamily) ->
+    {ok, KeyspaceDefinition} = describe_keyspace(Keyspace),
+    Result = 
+    case lists:keyfind(ColumnFamily, #cfDef.name, KeyspaceDefinition#ksDef.cf_defs) of
+        false -> undefined;
+        Value -> Value
+    end,
+    {ok, Result}.
+
+
+%% @doc Drop a column family
 -spec system_drop_column_family(server_ref(), column_family()) -> response().
 system_drop_column_family(ServerRef, ColumnFamily) ->
     route_call(ServerRef, {system_drop_column_family, ColumnFamily}, ?POOL_TIMEOUT).
 
-%% @doc Update a column fmaily
--spec system_update_column_family(server_ref(), column_family()) -> response().
-system_update_column_family(ServerRef, ColumnFamily) ->
-    route_call(ServerRef, {system_update_column_family, ColumnFamily}, ?POOL_TIMEOUT).
+%% @doc Update a column family
+-spec system_update_column_family(column_family_definition()) -> response().
+system_update_column_family(ColumnFamilyDefinition) ->
+    Keyspace = ColumnFamilyDefinition#cfDef.keyspace,
+    route_call(Keyspace, {system_update_column_family, ColumnFamilyDefinition}, ?POOL_TIMEOUT).
 
-%% @doc Remove all rows from a column fmaily
+-spec system_update_column_family(server_ref(), column_family_definition()) -> response().
+system_update_column_family(ServerRef, ColumnFamilyDefinition) ->
+    route_call(ServerRef, {system_update_column_family, ColumnFamilyDefinition}, ?POOL_TIMEOUT).
+
+%% @doc Remove all rows from a column family
 -spec truncate(server_ref(), column_family()) -> response().
 truncate(ServerRef, ColumnFamily) ->
     route_call(ServerRef, {truncate, ColumnFamily}, ?POOL_TIMEOUT).
@@ -397,7 +408,78 @@ describe_ring(Keyspace) ->
 describe_ring(ServerRef, Keyspace) ->
     route_call(ServerRef, {describe_ring, [Keyspace]}, ?POOL_TIMEOUT).
 
+-spec timestamp() -> integer().
+timestamp() ->
+    {Megasecs, Secs, Microsecs} = os:timestamp(),
+    Megasecs * 1000000000 + Secs * 1000 + Microsecs div 1000.
 
+%% Helpful Record Functions
+-spec column_path(column_family(), super_column(), column_name()) -> column_path().
+column_path(ColumnFamily, SuperColumn, ColumnName) when is_binary(ColumnFamily),
+                                                        is_binary(ColumnName) ->
+    #columnPath{column_family = ColumnFamily,
+                 super_column = SuperColumn,
+                 column = ColumnName}.
+
+-spec column_parent(column_family()) -> column_parent().
+column_parent(ColumnFamily) when is_binary(ColumnFamily) ->
+    column_parent(ColumnFamily, undefined).
+
+-spec column_parent(column_family(), super_column()) -> column_parent().
+column_parent(ColumnFamily, SuperColumn) when is_binary(ColumnFamily) ->
+    #columnParent{column_family = ColumnFamily,
+                  super_column = SuperColumn}.
+
+-spec column(column_name(), column_value(), column_timestamp(), column_ttl()) -> column().
+column(Name, Value, Timestamp, Ttl) when is_binary(Name),
+                                         is_binary(Value),
+                                         is_integer(Timestamp) ->
+    #column{name = Name,
+            value = Value,
+            timestamp = Timestamp,
+            ttl = Ttl}.
+
+-spec counter_column(column_name(), column_value()) -> counter_column().
+counter_column(Name, Value) when is_binary(Name),
+                                                 is_integer(Value) ->
+    #counterColumn{name = Name,
+                   value = Value}.
+
+column_family_definition(Keyspace, ColumnFamily) when is_binary(Keyspace),
+                                                      is_binary(ColumnFamily) ->
+    column_family_definition(Keyspace, ColumnFamily, false).
+
+column_family_definition(Keyspace, ColumnFamily, false) when is_binary(Keyspace),
+                                                      is_binary(ColumnFamily) ->
+    #cfDef{keyspace = Keyspace,
+           name = ColumnFamily
+          };
+column_family_definition(Keyspace, ColumnFamily, true) when is_binary(Keyspace),
+                                                      is_binary(ColumnFamily) ->
+    #cfDef{keyspace = Keyspace,
+           name = ColumnFamily,
+           default_validation_class = <<"CounterColumnType">>
+          }.
+
+keyspace_definition(Keyspace) when is_binary(Keyspace) ->
+    keyspace_definition(Keyspace, 1).
+
+keyspace_definition(Keyspace, ReplicationFactor) when is_binary(Keyspace),
+                                                      is_integer(ReplicationFactor) ->
+    #ksDef{name=Keyspace, 
+           strategy_class="org.apache.cassandra.locator.SimpleStrategy",
+           strategy_options = dict:store("replication_factor", integer_to_list(ReplicationFactor), dict:new())}.
+
+-spec slice_predicate(undefined | [column_name()], slice_start(), slice_end()) -> slice_predicate().
+slice_predicate(ColumnNames, Start, End) ->
+    slice_predicate(ColumnNames, Start, End, ?DEFAULT_SLICE_COUNT).
+-spec slice_predicate(undefined | [column_name()], slice_start(), slice_end(), slice_count()) -> slice_predicate().
+slice_predicate(ColumnNames, Start, End, Count) ->
+    Range = #sliceRange{start = Start, 
+                        finish = End, 
+                        count = Count},
+    #slicePredicate{column_names = ColumnNames,
+                    slice_range = Range}.
 
 
 %% ------------------------------------------------------------------
@@ -417,7 +499,8 @@ init([ConnectionOptions0]) ->
         {value, {set_keyspace, Bool}, ConnectionOptions3} -> 
             {Bool, ConnectionOptions3};
         false ->
-            {false, ConnectionOptions2}
+            % By default, set the keyspace
+            {true, ConnectionOptions2}
     end,
     Connection0 = connection(ConnectionOptions4),
     State0 = #state{keyspace = Keyspace1, 
