@@ -63,6 +63,7 @@
 -export([describe_version/0, describe_version/1]).
 -export([describe_snitch/0, describe_snitch/1]).
 -export([describe_partitioner/0, describe_partitioner/1]).
+-export([describe_schema_versions/0, describe_schema_versions/1]).
 -export([describe_keyspaces/0, describe_keyspaces/1]).
 -export([describe_cluster_name/0, describe_cluster_name/1]).
 -export([describe_ring/1, describe_ring/2]).
@@ -77,6 +78,7 @@
 -export([column_family_definition/2, column_family_definition/3]).
 -export([keyspace_definition/1, keyspace_definition/2]).
 -export([slice_predicate/3, slice_predicate/4]).
+-export([key_range/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -145,10 +147,12 @@ start_pool(PoolName, PoolOptions, ConnectionOptions) when is_binary(PoolName),
     erlang_cassandra_poolboy_sup:start_pool(PoolName, PoolOptions, ConnectionOptions).
 
 
-%% @doc Start a pool for cql queries
+%% @doc Start a pool for cql queries.
+%%      Its, by default, of size 1 in case you plan on using prepared queries
+%%          (they are saved on a per connection basis)
 -spec start_cql_pool(pool_name()) -> supervisor:startchild_ret().
 start_cql_pool(PoolName) when is_binary(PoolName) ->
-    PoolOptions = application:get_env(erlang_cassandra, pool_options, ?DEFAULT_POOL_OPTIONS),
+    PoolOptions = application:get_env(erlang_cassandra, cql_pool_options, ?CQL_POOL_OPTIONS),
     ConnectionOptions = application:get_env(erlang_cassandra, connection_options, ?DEFAULT_CONNECTION_OPTIONS),
     start_cql_pool(PoolName, PoolOptions, 
                [{set_keyspace, false} | ConnectionOptions]).
@@ -344,9 +348,10 @@ prepare_cql_query(CqlPool, CqlQuery, Compression) when is_binary(CqlQuery) ->
     route_call(CqlPool, {prepare_cql_query, CqlQuery, Compression}, ?POOL_TIMEOUT).
 
 %% @doc Execute a prepared a CQL query
--spec execute_prepared_cql_query(pool_name(), cql_query(), compression()) -> response().
-execute_prepared_cql_query(CqlPool, CqlQuery, Compression) when is_binary(CqlQuery) ->
-    route_call(CqlPool, {execute_prepared_cql_query, CqlQuery, Compression}, ?POOL_TIMEOUT).
+-spec execute_prepared_cql_query(pool_name(), cql_query(), list()) -> response().
+execute_prepared_cql_query(CqlPool, CqlQuery, Values) when is_integer(CqlQuery),
+                                                           is_list(Values) ->
+    route_call(CqlPool, {execute_prepared_cql_query, CqlQuery, Values}, ?POOL_TIMEOUT).
 
 %% @doc Get the Thrift API version
 -spec describe_version() -> response().
@@ -377,6 +382,16 @@ describe_partitioner() ->
 -spec describe_partitioner(keyspace()) -> response().
 describe_partitioner(ServerRef) ->
     route_call(ServerRef, {describe_partitioner}, ?POOL_TIMEOUT).
+
+%% @doc Get the schema_versions used for the cluster
+-spec describe_schema_versions() -> response().
+describe_schema_versions() ->
+    describe_schema_versions(?DEFAULT_POOL_NAME).
+
+%% @doc Get the Thrift API schema_versions
+-spec describe_schema_versions(keyspace()) -> response().
+describe_schema_versions(ServerRef) ->
+    route_call(ServerRef, {describe_schema_versions}, ?POOL_TIMEOUT).
 
 %% @doc Get the cluster_name 
 -spec describe_cluster_name() -> response().
@@ -452,7 +467,8 @@ column_family_definition(Keyspace, ColumnFamily) when is_binary(Keyspace),
 column_family_definition(Keyspace, ColumnFamily, false) when is_binary(Keyspace),
                                                       is_binary(ColumnFamily) ->
     #cfDef{keyspace = Keyspace,
-           name = ColumnFamily
+           name = ColumnFamily,
+           default_validation_class = <<"UTF8Type">>
           };
 column_family_definition(Keyspace, ColumnFamily, true) when is_binary(Keyspace),
                                                       is_binary(ColumnFamily) ->
@@ -481,6 +497,10 @@ slice_predicate(ColumnNames, Start, End, Count) ->
     #slicePredicate{column_names = ColumnNames,
                     slice_range = Range}.
 
+-spec key_range(row_key(), row_key()) -> key_range().
+key_range(StartKey, EndKey) ->
+    #keyRange{start_key = StartKey,
+               end_key = EndKey}.
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
@@ -610,6 +630,9 @@ do_request(Connection, {Function, Args}, _State) ->
             case {Exception, Reason} of
                 {throw, {Connection1, Response = {exception, _}}} ->
                     {Connection1, Response};
+                % Thrift client closes the connection
+                {error, {case_clause,{error,closed}}} ->
+                    {undefined, {error, badarg}};
                 {error, badarg} ->
                     {Connection, {error, badarg}}
 

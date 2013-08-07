@@ -64,6 +64,9 @@
 -define(DEFAULT_POOL_OPTIONS, [{size, 5},
                                {max_overflow, 10}
                               ]).
+-define(CQL_POOL_OPTIONS, [{size, 1},
+                               {max_overflow, 0}
+                              ]).
 
 -define(DEFAULT_CONNECTION_OPTIONS, [{thrift_host, ?DEFAULT_THRIFT_HOST},
                                      {thrift_port, ?DEFAULT_THRIFT_PORT},

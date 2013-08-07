@@ -31,6 +31,7 @@
 -define(ROW_KEY_PREFIX, "row_key").
 -define(CONSISTENCY_LEVEL, 1).
 -define(MAX_COLUMNS, 100).
+-define(MAX_ROWS, 10).
 
 
 suite() ->
@@ -122,13 +123,28 @@ groups() ->
          [
                 t_insert_column,
                 t_get_column,
-                t_get_column_slice,
                 t_remove_column
+         ]},
+        {column_slice, [],
+         [
+                t_get_slice,
+                t_get_range_slices,
+                t_multiget_slice
+         ]},
+        {count, [],
+         [
+                t_get_count,
+                t_multiget_count
          ]},
         {counter_crud, [{repeat, 3}],
          [
                 t_add_counter,
                 t_remove_counter
+         ]},
+        {cql, [],
+         [
+                t_execute_cql_query,
+                t_prepare_and_execute_cql_query
          ]}
 
     ].
@@ -138,7 +154,10 @@ all() ->
         {group, keyspace_crud},
         {group, column_crud},
         {group, column_family_crud},
-        {group, counter_crud}
+        {group, counter_crud},
+        {group, column_slice},
+        {group, count},
+        {group, cql}
     ].
 
 t_add_drop_keyspace(_) ->
@@ -204,12 +223,40 @@ prop_get_column() ->
     numtests(?NUMTESTS,
              ?FORALL({Keyspace, RowKey, ColumnParent, Column}, {keyspace_word(), row_key_word(), column_parent_item(), column_item()}, validate_get_column(Keyspace, RowKey, ColumnParent, Column))).
 
-t_get_column_slice(_) ->
-    ?PROPTEST(prop_get_column_slice).
+t_get_slice(_) ->
+    ?PROPTEST(prop_get_slice).
 
-prop_get_column_slice() ->
+prop_get_slice() ->
     numtests(?NUMTESTS,
-             ?FORALL({Keyspace, RowKey, ColumnParent, ColumnList}, {keyspace_word(), row_key_word(), column_parent_item(), column_item_list()}, validate_get_column_slice(Keyspace, RowKey, ColumnParent, ColumnList))).
+             ?FORALL({Keyspace, RowKey, ColumnParent, ColumnList}, {keyspace_word(), row_key_word(), column_parent_item(), column_item_list()}, validate_get_slice(Keyspace, RowKey, ColumnParent, ColumnList))).
+
+t_get_range_slices(_) ->
+    ?PROPTEST(prop_get_range_slices).
+
+prop_get_range_slices() ->
+    numtests(?NUMTESTS,
+             ?FORALL({Keyspace, RowKeyList, ColumnParent, ColumnList}, {keyspace_word(), row_key_list(), column_parent_item(), column_item_list()}, validate_get_range_slices(Keyspace, RowKeyList, ColumnParent, ColumnList))).
+
+t_multiget_slice(_) ->
+    ?PROPTEST(prop_multiget_slice).
+
+prop_multiget_slice() ->
+    numtests(?NUMTESTS,
+             ?FORALL({Keyspace, RowKeyList, ColumnParent, ColumnList}, {keyspace_word(), row_key_list(), column_parent_item(), column_item_list()}, validate_multiget_slice(Keyspace, RowKeyList, ColumnParent, ColumnList))).
+
+t_get_count(_) ->
+    ?PROPTEST(prop_get_count).
+
+prop_get_count() ->
+    numtests(?NUMTESTS,
+             ?FORALL({Keyspace, RowKey, ColumnParent, ColumnList}, {keyspace_word(), row_key_word(), column_parent_item(), column_item_list()}, validate_get_count(Keyspace, RowKey, ColumnParent, ColumnList))).
+
+t_multiget_count(_) ->
+    ?PROPTEST(prop_multiget_count).
+
+prop_multiget_count() ->
+    numtests(?NUMTESTS,
+             ?FORALL({Keyspace, RowKeyList, ColumnParent, ColumnList}, {keyspace_word(), row_key_list(), column_parent_item(), column_item_list()}, validate_multiget_count(Keyspace, RowKeyList, ColumnParent, ColumnList))).
 
 t_remove_column(_) ->
     ?PROPTEST(prop_remove_column).
@@ -231,6 +278,20 @@ t_remove_counter(_) ->
 prop_remove_counter() ->
     numtests(?NUMTESTS,
              ?FORALL({Keyspace, RowKey, ColumnParent, CounterColumn}, {keyspace_word(), row_key_word(), column_parent_item(), counter_column_item()}, validate_remove_counter(Keyspace, RowKey, ColumnParent, CounterColumn))).
+
+t_execute_cql_query(_) ->
+    ?PROPTEST(prop_execute_cql_query).
+
+prop_execute_cql_query() ->
+    numtests(?NUMTESTS,
+             ?FORALL(Keyspace, keyspace_word(), validate_execute_cql_query(Keyspace))).
+
+t_prepare_and_execute_cql_query(_) ->
+    ?PROPTEST(prop_prepare_and_execute_cql_query).
+
+prop_prepare_and_execute_cql_query() ->
+    numtests(?NUMTESTS,
+             ?FORALL({CqlPool, Keyspace}, {keyspace_word(), keyspace_word()}, validate_prepare_and_execute_cql_query(CqlPool, Keyspace))).
 
 
 validate_add_drop_keyspace(Keyspace) ->
@@ -294,7 +355,7 @@ validate_update_column_family(Keyspace, ColumnFamilyDefinition) ->
     {ok, _} = erlang_cassandra:system_drop_keyspace(Keyspace),
     true.
 
-validate_truncate_column_family(Keyspace, RowKey, ColumnParent, [First | _] = ColumnList) ->
+validate_truncate_column_family(Keyspace, RowKey, ColumnParent, [FirstColumn | _] = ColumnList) ->
     {ok, _} = create_keyspace(Keyspace),
     {ok, ok} = erlang_cassandra:set_keyspace(Keyspace),
     % set up the column family
@@ -308,8 +369,8 @@ validate_truncate_column_family(Keyspace, RowKey, ColumnParent, [First | _] = Co
     % truncate
     {ok, ok} = erlang_cassandra:truncate(Keyspace, ColumnFamily),
     % Validate
-    Last = lists:last(ColumnList),
-    SlicePredicate = erlang_cassandra:slice_predicate(undefined, First#column.name, Last#column.name),
+    LastColumn = lists:last(ColumnList),
+    SlicePredicate = erlang_cassandra:slice_predicate(undefined, FirstColumn#column.name, LastColumn#column.name),
     {ok, []} = erlang_cassandra:get_slice(Keyspace, RowKey, ColumnParent, SlicePredicate, ?CONSISTENCY_LEVEL),
     % cleanup
     {ok, _} = erlang_cassandra:system_drop_column_family(Keyspace, ColumnFamily),
@@ -351,7 +412,7 @@ validate_get_column(Keyspace, RowKey, ColumnParent, Column) ->
     {ok, _} = erlang_cassandra:system_drop_keyspace(Keyspace),
     true.
 
-validate_get_column_slice(Keyspace, RowKey, ColumnParent, [First | _] = ColumnList) ->
+validate_get_slice(Keyspace, RowKey, ColumnParent, [FirstColumn | _] = ColumnList) ->
     {ok, _} = create_keyspace(Keyspace),
     {ok, ok} = erlang_cassandra:set_keyspace(Keyspace),
     % set up the column family
@@ -363,8 +424,8 @@ validate_get_column_slice(Keyspace, RowKey, ColumnParent, [First | _] = ColumnLi
                 {ok, ok} = erlang_cassandra:insert(Keyspace, RowKey, ColumnParent, Column, ?CONSISTENCY_LEVEL)
         end, ColumnList),
     % get_slice
-    Last = lists:last(ColumnList),
-    SlicePredicate = erlang_cassandra:slice_predicate(undefined, First#column.name, Last#column.name),
+    LastColumn = lists:last(ColumnList),
+    SlicePredicate = erlang_cassandra:slice_predicate(undefined, FirstColumn#column.name, LastColumn#column.name),
     {ok, Response} = erlang_cassandra:get_slice(Keyspace, RowKey, ColumnParent, SlicePredicate, ?CONSISTENCY_LEVEL),
     % validate
     ResponseLength = length(Response), 
@@ -373,6 +434,112 @@ validate_get_column_slice(Keyspace, RowKey, ColumnParent, [First | _] = ColumnLi
     {ok, _} = erlang_cassandra:system_drop_column_family(Keyspace, ColumnFamily),
     {ok, _} = erlang_cassandra:system_drop_keyspace(Keyspace),
     true.
+
+validate_get_range_slices(Keyspace, [FirstRow | _] = RowKeyList, ColumnParent, [FirstColumn | _] = ColumnList) ->
+    {ok, _} = create_keyspace(Keyspace),
+    {ok, ok} = erlang_cassandra:set_keyspace(Keyspace),
+    % set up the column family
+    ColumnFamily = ColumnParent#columnParent.column_family,
+    ColumnFamilyDefinition = erlang_cassandra:column_family_definition(Keyspace, ColumnFamily),
+    {ok, _} = erlang_cassandra:system_add_column_family(ColumnFamilyDefinition),
+    % insert
+    lists:foreach(fun(RowKey) ->
+                lists:foreach(fun(Column) ->
+                            {ok, ok} = erlang_cassandra:insert(Keyspace, RowKey, ColumnParent, Column, ?CONSISTENCY_LEVEL)
+                    end, ColumnList)
+        end, RowKeyList),
+    % get_slice
+    % Not sorted, so, just compare the data in one row
+    KeyRange = erlang_cassandra:key_range(FirstRow, FirstRow),
+    LastColumn = lists:last(ColumnList),
+    SlicePredicate = erlang_cassandra:slice_predicate(undefined, FirstColumn#column.name, LastColumn#column.name),
+    {ok, Response} = erlang_cassandra:get_range_slices(Keyspace, ColumnParent, SlicePredicate, KeyRange, ?CONSISTENCY_LEVEL),
+    % validate
+    KeySlice = lists:keyfind(FirstRow, #keySlice.key, Response),
+    ResponseLength = length(KeySlice#keySlice.columns),
+    ResponseLength = length(ColumnList),
+    % cleanup
+    {ok, _} = erlang_cassandra:system_drop_column_family(Keyspace, ColumnFamily),
+    {ok, _} = erlang_cassandra:system_drop_keyspace(Keyspace),
+    true.
+
+validate_multiget_slice(Keyspace, RowKeyList, ColumnParent, [FirstColumn | _] = ColumnList) ->
+    {ok, _} = create_keyspace(Keyspace),
+    {ok, ok} = erlang_cassandra:set_keyspace(Keyspace),
+    % set up the column family
+    ColumnFamily = ColumnParent#columnParent.column_family,
+    ColumnFamilyDefinition = erlang_cassandra:column_family_definition(Keyspace, ColumnFamily),
+    {ok, _} = erlang_cassandra:system_add_column_family(ColumnFamilyDefinition),
+    % insert
+    lists:foreach(fun(RowKey) ->
+                lists:foreach(fun(Column) ->
+                            {ok, ok} = erlang_cassandra:insert(Keyspace, RowKey, ColumnParent, Column, ?CONSISTENCY_LEVEL)
+                    end, ColumnList)
+        end, RowKeyList),
+    % get_slice
+    LastColumn = lists:last(ColumnList),
+    SlicePredicate = erlang_cassandra:slice_predicate(undefined, FirstColumn#column.name, LastColumn#column.name),
+    {ok, Response} = erlang_cassandra:multiget_slice(Keyspace, RowKeyList, ColumnParent, SlicePredicate, ?CONSISTENCY_LEVEL),
+    ResponseLength = dict:fold(fun(_Key, Value, Acc) ->
+                length(Value) + Acc
+        end, 0, Response),
+
+    % validate
+    ResponseLength = length(RowKeyList) * length(ColumnList),
+    % cleanup
+    {ok, _} = erlang_cassandra:system_drop_column_family(Keyspace, ColumnFamily),
+    {ok, _} = erlang_cassandra:system_drop_keyspace(Keyspace),
+    true.
+
+validate_get_count(Keyspace, RowKey, ColumnParent, [FirstColumn | _] = ColumnList) ->
+    {ok, _} = create_keyspace(Keyspace),
+    {ok, ok} = erlang_cassandra:set_keyspace(Keyspace),
+    % set up the column family
+    ColumnFamily = ColumnParent#columnParent.column_family,
+    ColumnFamilyDefinition = erlang_cassandra:column_family_definition(Keyspace, ColumnFamily),
+    {ok, _} = erlang_cassandra:system_add_column_family(ColumnFamilyDefinition),
+    % insert
+     lists:foreach(fun(Column) ->
+                {ok, ok} = erlang_cassandra:insert(Keyspace, RowKey, ColumnParent, Column, ?CONSISTENCY_LEVEL)
+        end, ColumnList),
+    % get_slice
+    LastColumn = lists:last(ColumnList),
+    SlicePredicate = erlang_cassandra:slice_predicate(undefined, FirstColumn#column.name, LastColumn#column.name),
+    {ok, Response} = erlang_cassandra:get_count(Keyspace, RowKey, ColumnParent, SlicePredicate, ?CONSISTENCY_LEVEL),
+    Response = length(ColumnList),
+    % cleanup
+    {ok, _} = erlang_cassandra:system_drop_column_family(Keyspace, ColumnFamily),
+    {ok, _} = erlang_cassandra:system_drop_keyspace(Keyspace),
+    true.
+
+validate_multiget_count(Keyspace, RowKeyList, ColumnParent, [FirstColumn | _] = ColumnList) ->
+    {ok, _} = create_keyspace(Keyspace),
+    {ok, ok} = erlang_cassandra:set_keyspace(Keyspace),
+    % set up the column family
+    ColumnFamily = ColumnParent#columnParent.column_family,
+    ColumnFamilyDefinition = erlang_cassandra:column_family_definition(Keyspace, ColumnFamily),
+    {ok, _} = erlang_cassandra:system_add_column_family(ColumnFamilyDefinition),
+    % insert
+    lists:foreach(fun(RowKey) ->
+                lists:foreach(fun(Column) ->
+                            {ok, ok} = erlang_cassandra:insert(Keyspace, RowKey, ColumnParent, Column, ?CONSISTENCY_LEVEL)
+                    end, ColumnList)
+        end, RowKeyList),
+    % get_slice
+    LastColumn = lists:last(ColumnList),
+    SlicePredicate = erlang_cassandra:slice_predicate(undefined, FirstColumn#column.name, LastColumn#column.name),
+    {ok, Response} = erlang_cassandra:multiget_count(Keyspace, RowKeyList, ColumnParent, SlicePredicate, ?CONSISTENCY_LEVEL),
+    ResponseLength = dict:fold(fun(_Key, Value, Acc) ->
+                Value + Acc
+        end, 0, Response),
+
+    % validate
+    ResponseLength = length(RowKeyList) * length(ColumnList),
+    % cleanup
+%    {ok, _} = erlang_cassandra:system_drop_column_family(Keyspace, ColumnFamily),
+%    {ok, _} = erlang_cassandra:system_drop_keyspace(Keyspace),
+    true.
+
 
 validate_remove_column(Keyspace, RowKey, ColumnParent, Column) ->
     {ok, _} = create_keyspace(Keyspace),
@@ -438,6 +605,28 @@ validate_remove_counter(Keyspace, RowKey, ColumnParent, CounterColumn) ->
     {ok, _} = erlang_cassandra:system_drop_keyspace(Keyspace),
     true.
 
+validate_execute_cql_query(Keyspace) ->
+    {ok, _} = create_keyspace(Keyspace),
+    Query = <<"use ", Keyspace/binary, ";">>,
+    {ok, Response} = erlang_cassandra:execute_cql_query(Keyspace, Query, 2),
+    true = is_record(Response, cqlResult),
+    {ok, _} = erlang_cassandra:system_drop_keyspace(Keyspace),
+    true.
+
+validate_prepare_and_execute_cql_query(CqlPool, Keyspace) ->
+    {ok, _} = erlang_cassandra:start_cql_pool(CqlPool),
+    {ok, _} = create_keyspace(Keyspace),
+    Query1 = <<"use ", Keyspace/binary, ";">>,
+    {ok, _Response1} = erlang_cassandra:execute_cql_query(CqlPool, Query1, 2),
+    Query2 = <<"CREATE COLUMNFAMILY test (KEY int PRIMARY KEY, text_field text);">>,
+    {ok, _Response2} = erlang_cassandra:execute_cql_query(CqlPool, Query2, 2),
+    Query3 = <<"insert into test (KEY, text_field) values (?, ?);">>,
+    {ok, Response3} = erlang_cassandra:prepare_cql_query(CqlPool, Query3, 2),
+    {ok, Response4} = erlang_cassandra:execute_prepared_cql_query(CqlPool, Response3#cqlPreparedResult.itemId, [<<"123">>, <<"text">>]),
+    true = is_record(Response4, cqlResult),
+    {ok, _} = erlang_cassandra:system_drop_keyspace(Keyspace),
+    true.
+
 random_name(Name) when is_list(Name) ->
     binary_to_list(random_name(list_to_binary(Name)));
 random_name(Name) ->
@@ -477,6 +666,9 @@ column_value_word() ->
 row_key_word() ->
     ?LET(X, non_empty(limited_word(?ROW_KEY_PREFIX)), list_to_binary(X)).
 
+row_key_list() ->
+    ?LET(X, non_empty(limited_word(?ROW_KEY_PREFIX)), row_list(list_to_binary(X))).
+
 keyspace_and_column_family_definition_item() ->
     ?LET({Keyspace, ColumnFamily}, 
          {keyspace_word(), column_family_word()},
@@ -506,6 +698,13 @@ counter_column_item() ->
           non_neg_integer()},
          erlang_cassandra:counter_column(ColumnName, ColumnValue)).
 
+row_list(RowKey) ->
+    Count = random:uniform(?MAX_ROWS),
+    List = lists:map(fun(I) -> 
+                    BI = list_to_binary(integer_to_list(I)),
+                    <<RowKey/binary, "_", BI/binary>>
+        end, lists:seq(1, Count)),
+    lists:usort(List).
 
 column_list(ColumnName, ColumnValue, Timestamp, Ttl) ->
     Count = random:uniform(?MAX_COLUMNS),
