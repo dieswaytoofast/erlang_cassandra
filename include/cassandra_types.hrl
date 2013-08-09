@@ -199,7 +199,7 @@
                 compression_options :: dict(),
                 bloom_filter_fp_chance :: float(),
                 caching = "keys_only" :: string() | binary(),
-                dclocal_read_repair_chance = 0 :: float(),
+                dclocal_read_repair_chance = 0.0 :: float(),
                 populate_io_cache_on_flush :: boolean(),
                 row_cache_size :: float(),
                 key_cache_size :: float(),

@@ -27,6 +27,7 @@
 -export([stop_pool/1]).
 -export([start_pool/1, start_pool/2, start_pool/3]).
 -export([start_cql_pool/1, start_cql_pool/2, start_cql_pool/3]).
+-export([stop_cql_pool/1]).
 -export([registered_pool_name/1]).
 -export([get_target/1]).
 
@@ -177,6 +178,12 @@ start_cql_pool(PoolName, PoolOptions, ConnectionOptions) when is_binary(PoolName
 %% @doc Stop a poolboy instance
 -spec stop_pool(pool_name()) -> ok | error().
 stop_pool(PoolName) ->
+    erlang_cassandra_poolboy_sup:stop_pool(PoolName).
+
+
+%% @doc Stop a poolboy instance
+-spec stop_cql_pool(pool_name()) -> ok | error().
+stop_cql_pool(PoolName) ->
     erlang_cassandra_poolboy_sup:stop_pool(PoolName).
 
 
@@ -348,7 +355,7 @@ prepare_cql_query(CqlPool, CqlQuery, Compression) when is_binary(CqlQuery) ->
     route_call(CqlPool, {prepare_cql_query, CqlQuery, Compression}, ?POOL_TIMEOUT).
 
 %% @doc Execute a prepared a CQL query
--spec execute_prepared_cql_query(pool_name(), cql_query(), list()) -> response().
+-spec execute_prepared_cql_query(pool_name(), cql_query_id(), list()) -> response().
 execute_prepared_cql_query(CqlPool, CqlQuery, Values) when is_integer(CqlQuery),
                                                            is_list(Values) ->
     route_call(CqlPool, {execute_prepared_cql_query, CqlQuery, Values}, ?POOL_TIMEOUT).
@@ -454,16 +461,18 @@ column(Name, Value, Timestamp, Ttl) when is_binary(Name),
             timestamp = Timestamp,
             ttl = Ttl}.
 
--spec counter_column(column_name(), column_value()) -> counter_column().
+-spec counter_column(counter_column_name(), counter_column_value()) -> counter_column().
 counter_column(Name, Value) when is_binary(Name),
                                                  is_integer(Value) ->
     #counterColumn{name = Name,
                    value = Value}.
 
+-spec column_family_definition(keyspace(), column_family()) -> column_family_definition().
 column_family_definition(Keyspace, ColumnFamily) when is_binary(Keyspace),
                                                       is_binary(ColumnFamily) ->
     column_family_definition(Keyspace, ColumnFamily, false).
 
+-spec column_family_definition(keyspace(), column_family(), is_counter_column()) -> column_family_definition().
 column_family_definition(Keyspace, ColumnFamily, false) when is_binary(Keyspace),
                                                       is_binary(ColumnFamily) ->
     #cfDef{keyspace = Keyspace,
@@ -477,9 +486,11 @@ column_family_definition(Keyspace, ColumnFamily, true) when is_binary(Keyspace),
            default_validation_class = <<"CounterColumnType">>
           }.
 
+-spec keyspace_definition(keyspace()) -> keyspace_definition().
 keyspace_definition(Keyspace) when is_binary(Keyspace) ->
     keyspace_definition(Keyspace, 1).
 
+-spec keyspace_definition(keyspace(), replication_factor()) -> keyspace_definition().
 keyspace_definition(Keyspace, ReplicationFactor) when is_binary(Keyspace),
                                                       is_integer(ReplicationFactor) ->
     #ksDef{name=Keyspace, 
@@ -577,9 +588,11 @@ connection(ConnectionOptions) ->
         {thrift_options, Options} -> Options;
         false -> ?DEFAULT_THRIFT_OPTIONS
     end,
-    case thrift_client_util:new(ThriftHost, ThriftPort, cassandra_thrift, ThriftOptions) of
-        {ok, Connection} -> Connection;
-        {error, _Error} -> undefined
+    try
+        {ok, Connection} = thrift_client_util:new(ThriftHost, ThriftPort, cassandra_thrift, ThriftOptions),
+        Connection
+    catch
+        _:_ -> undefined
     end.
 
 %% @doc Create a Thrift command based on the function and arguments
@@ -595,15 +608,7 @@ request({F, A1, A2}) ->
 request({F, A1, A2, A3}) ->
     {F, [A1, A2, A3]};
 request({F, A1, A2, A3, A4}) ->
-    {F, [A1, A2, A3, A4]};
-request({F, A1, A2, A3, A4, A5}) ->
-    {F, [A1, A2, A3, A4, A5]};
-request({F, A1, A2, A3, A4, A5, A6}) ->
-    {F, [A1, A2, A3, A4, A5, A6]};
-request({F, A1, A2, A3, A4, A5, A6, A7}) ->
-    {F, [A1, A2, A3, A4, A5, A6, A7]};
-request({F, A1, A2, A3, A4, A5, A6, A7, A8}) ->
-    {F, [A1, A2, A3, A4, A5, A6, A7, A8]}.
+    {F, [A1, A2, A3, A4]}.
 
 
 %% @doc Process the request over thrift
@@ -619,10 +624,6 @@ do_request(Connection, {Function, Args}, _State) ->
     try thrift_client:call(Connection, Function, Args) of
         {Connection1, Response = {ok, _}} ->
             {Connection1, Response};
-        {_,  Response = {error, econnrefused}} ->
-            {undefined, Response};
-        {_,  Response = {error, closed}} ->
-            {undefined, Response};
         {Connection1, Response = {error, _}} ->
             {Connection1, Response}
     catch
@@ -631,8 +632,10 @@ do_request(Connection, {Function, Args}, _State) ->
                 {throw, {Connection1, Response = {exception, _}}} ->
                     {Connection1, Response};
                 % Thrift client closes the connection
-                {error, {case_clause,{error,closed}}} ->
+                {error, {case_clause,{error, closed}}} ->
                     {undefined, {error, badarg}};
+                {error, {case_clause,{error, econnrefused}}} ->
+                    {undefined, {error, econnrefused}};
                 {error, badarg} ->
                     {Connection, {error, badarg}}
 
@@ -651,14 +654,6 @@ route_call(Keyspace, Command = {_Function, _A1, _A2, _A3}, Timeout) when is_bina
     pool_call(Keyspace, Command, Timeout);
 route_call(Keyspace, Command = {_Function, _A1, _A2, _A3, _A4}, Timeout) when is_binary(Keyspace) ->
     pool_call(Keyspace, Command, Timeout);
-route_call(Keyspace, Command = {_Function, _A1, _A2, _A3, _A4, _A5}, Timeout) when is_binary(Keyspace) ->
-    pool_call(Keyspace, Command, Timeout);
-route_call(Keyspace, Command = {_Function, _A1, _A2, _A3, _A4, _A5, _A6}, Timeout) when is_binary(Keyspace) ->
-    pool_call(Keyspace, Command, Timeout);
-route_call(Keyspace, Command = {_Function, _A1, _A2, _A3, _A4, _A5, _A6, _A7}, Timeout) when is_binary(Keyspace) ->
-    pool_call(Keyspace, Command, Timeout);
-route_call(Keyspace, Command = {_Function, _A1, _A2, _A3, _A4, _A5, _A6, _A7, _A8}, Timeout) when is_binary(Keyspace) ->
-    pool_call(Keyspace, Command, Timeout);
 
 % Doubled list because of the Poolboy double routing
 route_call(ServerRef, Command = {_Function}, Timeout) ->
@@ -674,14 +669,6 @@ route_call(ServerRef, Command = {_Function, _A1, _A2}, Timeout) ->
 route_call(ServerRef, Command = {_Function, _A1, _A2, _A3}, Timeout) ->
     gen_server:call(get_target(ServerRef), Command, Timeout);
 route_call(ServerRef, Command = {_Function, _A1, _A2, _A3, _A4}, Timeout) ->
-    gen_server:call(get_target(ServerRef), Command, Timeout);
-route_call(ServerRef, Command = {_Function, _A1, _A2, _A3, _A4, _A5}, Timeout) ->
-    gen_server:call(get_target(ServerRef), Command, Timeout);
-route_call(ServerRef, Command = {_Function, _A1, _A2, _A3, _A4, _A5, _A6}, Timeout) ->
-    gen_server:call(get_target(ServerRef), Command, Timeout);
-route_call(ServerRef, Command = {_Function, _A1, _A2, _A3, _A4, _A5, _A6, _A7}, Timeout) ->
-    gen_server:call(get_target(ServerRef), Command, Timeout);
-route_call(ServerRef, Command = {_Function, _A1, _A2, _A3, _A4, _A5, _A6, _A7, _A8}, Timeout) ->
     gen_server:call(get_target(ServerRef), Command, Timeout).
 
 pool_call(PoolName, Command, Timeout) ->

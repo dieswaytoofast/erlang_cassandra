@@ -16,7 +16,7 @@
 -type error()           :: {error, Reason :: term()}.
 -type method()          :: atom().
 -type request()         :: {atom(), [tuple()]} | error().
--type response()        :: [tuple()] | error().
+-type response()        :: {ok, any()} | error().
 -type connection()      :: any().
 -type node_name()       :: binary().
 -type index()           :: binary().
@@ -40,9 +40,13 @@
 -type super_column()    ::  binary() | undefined.
 -type column_name()     ::  binary().
 -type column_value()    ::  binary().
+-type is_counter_column() ::  boolean().
+-type counter_column_name()     ::  binary().
+-type counter_column_value()    ::  integer().
 -type column_timestamp()  :: non_neg_integer().
 -type column_ttl()      :: non_neg_integer() | undefined.
 -type consistency_level() :: non_neg_integer().
+-type replication_factor() ::  non_neg_integer().
 -type column()          :: #column{}.
 -type column_parent()   :: #columnParent{}.
 -type column_path()     :: #columnPath{}.
@@ -53,6 +57,7 @@
 -type slice_count()     :: non_neg_integer().
 -type slice_predicate() :: #slicePredicate{}.
 -type cql_query()       :: binary().
+-type cql_query_id()    :: integer().
 -type compression()     :: binary().
 
 %% Defaults

@@ -125,13 +125,13 @@ groups() ->
                 t_get_column,
                 t_remove_column
          ]},
-        {column_slice, [],
+        {column_slice, [{repeat, 3}],
          [
                 t_get_slice,
                 t_get_range_slices,
                 t_multiget_slice
          ]},
-        {count, [],
+        {count, [{repeat, 3}],
          [
                 t_get_count,
                 t_multiget_count
@@ -141,7 +141,7 @@ groups() ->
                 t_add_counter,
                 t_remove_counter
          ]},
-        {cql, [],
+        {cql, [{repeat, 3}],
          [
                 t_execute_cql_query,
                 t_prepare_and_execute_cql_query
@@ -536,8 +536,8 @@ validate_multiget_count(Keyspace, RowKeyList, ColumnParent, [FirstColumn | _] = 
     % validate
     ResponseLength = length(RowKeyList) * length(ColumnList),
     % cleanup
-%    {ok, _} = erlang_cassandra:system_drop_column_family(Keyspace, ColumnFamily),
-%    {ok, _} = erlang_cassandra:system_drop_keyspace(Keyspace),
+    {ok, _} = erlang_cassandra:system_drop_column_family(Keyspace, ColumnFamily),
+    {ok, _} = erlang_cassandra:system_drop_keyspace(Keyspace),
     true.
 
 
@@ -625,6 +625,7 @@ validate_prepare_and_execute_cql_query(CqlPool, Keyspace) ->
     {ok, Response4} = erlang_cassandra:execute_prepared_cql_query(CqlPool, Response3#cqlPreparedResult.itemId, [<<"123">>, <<"text">>]),
     true = is_record(Response4, cqlResult),
     {ok, _} = erlang_cassandra:system_drop_keyspace(Keyspace),
+    ok = erlang_cassandra:stop_cql_pool(CqlPool),
     true.
 
 random_name(Name) when is_list(Name) ->
