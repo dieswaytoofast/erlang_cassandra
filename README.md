@@ -3,6 +3,7 @@ erlang_cassandra
 
 Erlang thrift interface to Cassandra
 
+
 Liberally takes ideas from
 [Louis-Philippe Gauthier's](https://github.com/lpgauth) truly excellent [cassanderl](https://github.com/lpgauth/cassanderl), but with 
 

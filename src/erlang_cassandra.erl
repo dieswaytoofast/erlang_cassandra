@@ -29,7 +29,6 @@
 -export([start_cql_pool/1, start_cql_pool/2, start_cql_pool/3]).
 -export([stop_cql_pool/1]).
 -export([registered_pool_name/1]).
--export([get_target/1]).
 
 -export([set_keyspace/1, set_keyspace/2]).
 -export([describe_keyspace/1, describe_keyspace/2]).
@@ -123,36 +122,39 @@ start_link(ConnectionOptions) ->
 
 %% @doc Name used to register the pool server
 -spec registered_pool_name(pool_name()) -> registered_pool_name().
-registered_pool_name(PoolName) ->
-    binary_to_atom(<<?REGISTERED_NAME_PREFIX, PoolName/binary, ".pool">>, utf8).
+registered_pool_name(PoolName) when is_binary(PoolName) ->
+    binary_to_atom(<<?REGISTERED_NAME_PREFIX, PoolName/binary, ".pool">>, utf8);
+registered_pool_name({Host, Port, PoolName}) ->
+    BHost = binary_host(Host),
+    BPort = binary_port(Port),
+    binary_to_atom(<<?REGISTERED_NAME_PREFIX, BHost/binary, "_", BPort/binary, "_", PoolName/binary, ".pool">>, utf8).
+
 
 %% @doc Start a poolboy instance
 -spec start_pool(pool_name()) -> supervisor:startchild_ret().
-start_pool(PoolName) when is_binary(PoolName) ->
+start_pool(PoolName) ->
     PoolOptions = application:get_env(erlang_cassandra, pool_options, ?DEFAULT_POOL_OPTIONS),
     ConnectionOptions = application:get_env(erlang_cassandra, connection_options, ?DEFAULT_CONNECTION_OPTIONS),
     start_pool(PoolName, PoolOptions, ConnectionOptions).
 
 %% @doc Start a poolboy instance
 -spec start_pool(pool_name(), params()) -> supervisor:startchild_ret().
-start_pool(PoolName, PoolOptions) when is_binary(PoolName),
-                                       is_list(PoolOptions) ->
+start_pool(PoolName, PoolOptions) when is_list(PoolOptions) ->
     ConnectionOptions = application:get_env(erlang_cassandra, connection_options, ?DEFAULT_CONNECTION_OPTIONS),
     start_pool(PoolName, PoolOptions, ConnectionOptions).
 
 %% @doc Start a poolboy instance with appropriate Pool & Conn settings
 -spec start_pool(pool_name(), params(), params()) -> supervisor:startchild_ret().
-start_pool(PoolName, PoolOptions, ConnectionOptions) when is_binary(PoolName),
-                                                      is_list(PoolOptions),
-                                                      is_list(ConnectionOptions) ->
-    erlang_cassandra_poolboy_sup:start_pool(PoolName, PoolOptions, ConnectionOptions).
+start_pool(PoolName, PoolOptions, ConnectionOptions) when is_list(PoolOptions),
+                                                          is_list(ConnectionOptions) ->
+    erlang_cassandra_poolboy_sup:start_pool(fq_server_ref(PoolName), PoolOptions, ConnectionOptions).
 
 
 %% @doc Start a pool for cql queries.
 %%      Its, by default, of size 1 in case you plan on using prepared queries
 %%          (they are saved on a per connection basis)
 -spec start_cql_pool(pool_name()) -> supervisor:startchild_ret().
-start_cql_pool(PoolName) when is_binary(PoolName) ->
+start_cql_pool(PoolName) ->
     PoolOptions = application:get_env(erlang_cassandra, cql_pool_options, ?CQL_POOL_OPTIONS),
     ConnectionOptions = application:get_env(erlang_cassandra, connection_options, ?DEFAULT_CONNECTION_OPTIONS),
     start_cql_pool(PoolName, PoolOptions, 
@@ -160,31 +162,29 @@ start_cql_pool(PoolName) when is_binary(PoolName) ->
 
 %% @doc Start a poolboy instance
 -spec start_cql_pool(pool_name(), params()) -> supervisor:startchild_ret().
-start_cql_pool(PoolName, PoolOptions) when is_binary(PoolName),
-                                       is_list(PoolOptions) ->
+start_cql_pool(PoolName, PoolOptions) when is_list(PoolOptions) ->
     ConnectionOptions = application:get_env(erlang_cassandra, connection_options, ?DEFAULT_CONNECTION_OPTIONS),
     start_cql_pool(PoolName, PoolOptions, 
                [{set_keyspace, false} | ConnectionOptions]).
 
 %% @doc Start a poolboy instance with appropriate Pool & Conn settings
 -spec start_cql_pool(pool_name(), params(), params()) -> supervisor:startchild_ret().
-start_cql_pool(PoolName, PoolOptions, ConnectionOptions) when is_binary(PoolName),
-                                                      is_list(PoolOptions),
-                                                      is_list(ConnectionOptions) ->
-    erlang_cassandra_poolboy_sup:start_pool(PoolName, PoolOptions, 
+start_cql_pool(PoolName, PoolOptions, ConnectionOptions) when is_list(PoolOptions),
+                                                                 is_list(ConnectionOptions) ->
+    erlang_cassandra_poolboy_sup:start_pool(fq_server_ref(PoolName), PoolOptions, 
                                             [{set_keyspace, false} | ConnectionOptions]).
 
 
 %% @doc Stop a poolboy instance
 -spec stop_pool(pool_name()) -> ok | error().
 stop_pool(PoolName) ->
-    erlang_cassandra_poolboy_sup:stop_pool(PoolName).
+    erlang_cassandra_poolboy_sup:stop_pool(fq_server_ref(PoolName)).
 
 
 %% @doc Stop a poolboy instance
 -spec stop_cql_pool(pool_name()) -> ok | error().
 stop_cql_pool(PoolName) ->
-    erlang_cassandra_poolboy_sup:stop_pool(PoolName).
+    erlang_cassandra_poolboy_sup:stop_pool(fq_server_ref(PoolName)).
 
 
 %% @doc Set the keyspace to be used by the connection
@@ -192,27 +192,27 @@ stop_cql_pool(PoolName) ->
 set_keyspace(Keyspace) ->
     set_keyspace(Keyspace, Keyspace).
 
--spec set_keyspace(server_ref(), keyspace()) -> response().
-set_keyspace(ServerRef, Keyspace) ->
-    route_call(ServerRef, {set_keyspace, [Keyspace]}, ?POOL_TIMEOUT).
+-spec set_keyspace(destination(), keyspace()) -> response().
+set_keyspace(Destination, Keyspace) ->
+    route_call(Destination, {set_keyspace, [Keyspace]}, ?POOL_TIMEOUT).
 
 %% @doc Describe the keyspace used by the connection
 -spec describe_keyspace(keyspace()) -> response().
 describe_keyspace(Keyspace) ->
     describe_keyspace(Keyspace, Keyspace).
 
--spec describe_keyspace(server_ref(), keyspace()) -> response().
-describe_keyspace(ServerRef, Keyspace) ->
-    route_call(ServerRef, {describe_keyspace, [Keyspace]}, ?POOL_TIMEOUT).
+-spec describe_keyspace(destination(), keyspace()) -> response().
+describe_keyspace(Destination, Keyspace) ->
+    route_call(Destination, {describe_keyspace, [Keyspace]}, ?POOL_TIMEOUT).
 
 %% @doc Add a keyspace
 -spec system_add_keyspace(keyspace_definition()) -> response().
 system_add_keyspace(KeyspaceDefinition) ->
-    system_add_keyspace(?DEFAULT_POOL_NAME, KeyspaceDefinition).
+    system_add_keyspace(?DEFAULT_KEYSPACE, KeyspaceDefinition).
 
--spec system_add_keyspace(server_ref(), keyspace_definition()) -> response().
-system_add_keyspace(ServerRef, KeyspaceDefinition) ->
-    route_call(ServerRef, {system_add_keyspace, KeyspaceDefinition}, ?POOL_TIMEOUT).
+-spec system_add_keyspace(destination(), keyspace_definition()) -> response().
+system_add_keyspace(Destination, KeyspaceDefinition) ->
+    route_call(Destination, {system_add_keyspace, KeyspaceDefinition}, ?POOL_TIMEOUT).
 
 %% @doc Update a keyspace
 -spec system_update_keyspace(keyspace_definition()) -> response().
@@ -220,37 +220,37 @@ system_update_keyspace(KeyspaceDefinition) ->
     Keyspace = KeyspaceDefinition#ksDef.name,
     system_update_keyspace(Keyspace, KeyspaceDefinition).
 
--spec system_update_keyspace(server_ref(), keyspace_definition()) -> response().
-system_update_keyspace(ServerRef, KeyspaceDefinition) ->
-    route_call(ServerRef, {system_update_keyspace, KeyspaceDefinition}, ?POOL_TIMEOUT).
+-spec system_update_keyspace(destination(), keyspace_definition()) -> response().
+system_update_keyspace(Destination, KeyspaceDefinition) ->
+    route_call(Destination, {system_update_keyspace, KeyspaceDefinition}, ?POOL_TIMEOUT).
 
 %% @doc Remove a keyspace
 -spec system_drop_keyspace(keyspace()) -> response().
 system_drop_keyspace(Keyspace) ->
-    system_drop_keyspace(?DEFAULT_POOL_NAME, Keyspace).
+    system_drop_keyspace(?DEFAULT_KEYSPACE, Keyspace).
 
--spec system_drop_keyspace(server_ref(), keyspace()) -> response().
-system_drop_keyspace(ServerRef, Keyspace) ->
-    Response = route_call(ServerRef, {system_drop_keyspace, Keyspace}, ?POOL_TIMEOUT),
+-spec system_drop_keyspace(destination(), keyspace()) -> response().
+system_drop_keyspace(Destination, Keyspace) ->
+    Response = route_call(Destination, {system_drop_keyspace, Keyspace}, ?POOL_TIMEOUT),
     stop_pool(Keyspace),
     Response.
 
 %% @doc Insert a column
--spec insert(server_ref(), row_key(), column_parent(), column(), consistency_level()) -> response().
-insert(ServerRef, RowKey, ColumnParent, Column, ConsistencyLevel) ->
-    route_call(ServerRef, {insert, RowKey, ColumnParent, Column, ConsistencyLevel}, ?POOL_TIMEOUT).
+-spec insert(destination(), row_key(), column_parent(), column(), consistency_level()) -> response().
+insert(Destination, RowKey, ColumnParent, Column, ConsistencyLevel) ->
+    route_call(Destination, {insert, RowKey, ColumnParent, Column, ConsistencyLevel}, ?POOL_TIMEOUT).
 
 %% @doc Get a column
--spec get(server_ref(), row_key(), column_path(), consistency_level()) -> response().
-get(ServerRef, RowKey, ColumnPath, ConsistencyLevel) ->
-    route_call(ServerRef, {get, RowKey, ColumnPath, ConsistencyLevel}, ?POOL_TIMEOUT).
+-spec get(destination(), row_key(), column_path(), consistency_level()) -> response().
+get(Destination, RowKey, ColumnPath, ConsistencyLevel) ->
+    route_call(Destination, {get, RowKey, ColumnPath, ConsistencyLevel}, ?POOL_TIMEOUT).
 
 %% @doc Remove data from the row specified by key at the granularity 
 %%      specified by column_path, and the given timestamp
--spec remove(server_ref(), row_key(), column_path(), column_timestamp(), 
+-spec remove(destination(), row_key(), column_path(), column_timestamp(), 
                            consistency_level()) -> response().
-remove(ServerRef, RowKey, ColumnPath, ColumnTimestamp, ConsistencyLevel) ->
-    route_call(ServerRef, {remove, RowKey, ColumnPath, ColumnTimestamp, 
+remove(Destination, RowKey, ColumnPath, ColumnTimestamp, ConsistencyLevel) ->
+    route_call(Destination, {remove, RowKey, ColumnPath, ColumnTimestamp, 
                            ConsistencyLevel}, ?POOL_TIMEOUT).
 
 %% @doc Add a column family
@@ -259,9 +259,9 @@ system_add_column_family(ColumnFamilyDefinition) ->
     Keyspace = ColumnFamilyDefinition#cfDef.keyspace,
     route_call(Keyspace, {system_add_column_family, ColumnFamilyDefinition}, ?POOL_TIMEOUT).
 
--spec system_add_column_family(server_ref(), column_family_definition()) -> response().
-system_add_column_family(ServerRef, ColumnFamilyDefinition) ->
-    route_call(ServerRef, {system_add_column_family, ColumnFamilyDefinition}, ?POOL_TIMEOUT).
+-spec system_add_column_family(destination(), column_family_definition()) -> response().
+system_add_column_family(Destination, ColumnFamilyDefinition) ->
+    route_call(Destination, {system_add_column_family, ColumnFamilyDefinition}, ?POOL_TIMEOUT).
 
 %% @doc Get the column family definition
 -spec system_describe_column_family(keyspace(), column_family()) -> response().
@@ -276,9 +276,9 @@ system_describe_column_family(Keyspace, ColumnFamily) ->
 
 
 %% @doc Drop a column family
--spec system_drop_column_family(server_ref(), column_family()) -> response().
-system_drop_column_family(ServerRef, ColumnFamily) ->
-    route_call(ServerRef, {system_drop_column_family, ColumnFamily}, ?POOL_TIMEOUT).
+-spec system_drop_column_family(destination(), column_family()) -> response().
+system_drop_column_family(Destination, ColumnFamily) ->
+    route_call(Destination, {system_drop_column_family, ColumnFamily}, ?POOL_TIMEOUT).
 
 %% @doc Update a column family
 -spec system_update_column_family(column_family_definition()) -> response().
@@ -286,62 +286,62 @@ system_update_column_family(ColumnFamilyDefinition) ->
     Keyspace = ColumnFamilyDefinition#cfDef.keyspace,
     route_call(Keyspace, {system_update_column_family, ColumnFamilyDefinition}, ?POOL_TIMEOUT).
 
--spec system_update_column_family(server_ref(), column_family_definition()) -> response().
-system_update_column_family(ServerRef, ColumnFamilyDefinition) ->
-    route_call(ServerRef, {system_update_column_family, ColumnFamilyDefinition}, ?POOL_TIMEOUT).
+-spec system_update_column_family(destination(), column_family_definition()) -> response().
+system_update_column_family(Destination, ColumnFamilyDefinition) ->
+    route_call(Destination, {system_update_column_family, ColumnFamilyDefinition}, ?POOL_TIMEOUT).
 
 %% @doc Remove all rows from a column family
--spec truncate(server_ref(), column_family()) -> response().
-truncate(ServerRef, ColumnFamily) ->
-    route_call(ServerRef, {truncate, ColumnFamily}, ?POOL_TIMEOUT).
+-spec truncate(destination(), column_family()) -> response().
+truncate(Destination, ColumnFamily) ->
+    route_call(Destination, {truncate, ColumnFamily}, ?POOL_TIMEOUT).
 
 %% @doc Increment a counter column
--spec add(server_ref(), row_key(), column_parent(), counter_column(), consistency_level()) -> response().
-add(ServerRef, RowKey, ColumnParent, CounterColumn, ConsistencyLevel) ->
-    route_call(ServerRef, {add, RowKey, ColumnParent, CounterColumn,
+-spec add(destination(), row_key(), column_parent(), counter_column(), consistency_level()) -> response().
+add(Destination, RowKey, ColumnParent, CounterColumn, ConsistencyLevel) ->
+    route_call(Destination, {add, RowKey, ColumnParent, CounterColumn,
                            ConsistencyLevel}, ?POOL_TIMEOUT).
 
 %% @doc Remove a counter
--spec remove_counter(server_ref(), row_key(), column_path(), consistency_level()) -> response().
-remove_counter(ServerRef, RowKey, ColumnPath, ConsistencyLevel) ->
-    route_call(ServerRef, {remove_counter, RowKey, ColumnPath, ConsistencyLevel}, ?POOL_TIMEOUT).
+-spec remove_counter(destination(), row_key(), column_path(), consistency_level()) -> response().
+remove_counter(Destination, RowKey, ColumnPath, ConsistencyLevel) ->
+    route_call(Destination, {remove_counter, RowKey, ColumnPath, ConsistencyLevel}, ?POOL_TIMEOUT).
 
 %% @doc Get a group of columns based on a slice
--spec get_slice(server_ref(), row_key(), column_parent(), slice_predicate(), consistency_level()) -> response().
-get_slice(ServerRef, RowKey, ColumnParent, SlicePredicate, ConsistencyLevel) ->
-    route_call(ServerRef, {get_slice, RowKey, ColumnParent, SlicePredicate,
+-spec get_slice(destination(), row_key(), column_parent(), slice_predicate(), consistency_level()) -> response().
+get_slice(Destination, RowKey, ColumnParent, SlicePredicate, ConsistencyLevel) ->
+    route_call(Destination, {get_slice, RowKey, ColumnParent, SlicePredicate,
                            ConsistencyLevel}, ?POOL_TIMEOUT).
 
 %% @doc Get a group of columns based on a slice and a list of rows
--spec multiget_slice(server_ref(), [row_key()], column_parent(), slice_predicate(), consistency_level()) -> response().
-multiget_slice(ServerRef, RowKeys, ColumnParent, SlicePredicate, ConsistencyLevel) when is_list(RowKeys) ->
-    route_call(ServerRef, {multiget_slice, RowKeys, ColumnParent, SlicePredicate,
+-spec multiget_slice(destination(), [row_key()], column_parent(), slice_predicate(), consistency_level()) -> response().
+multiget_slice(Destination, RowKeys, ColumnParent, SlicePredicate, ConsistencyLevel) when is_list(RowKeys) ->
+    route_call(Destination, {multiget_slice, RowKeys, ColumnParent, SlicePredicate,
                            ConsistencyLevel}, ?POOL_TIMEOUT).
 
 %% @doc Count columns based on a slice
 %%      WARNING: NOT O(1)
--spec get_count(server_ref(), row_key(), column_parent(), slice_predicate(), consistency_level()) -> response().
-get_count(ServerRef, RowKey, ColumnParent, SlicePredicate, ConsistencyLevel) ->
-    route_call(ServerRef, {get_count, RowKey, ColumnParent, SlicePredicate,
+-spec get_count(destination(), row_key(), column_parent(), slice_predicate(), consistency_level()) -> response().
+get_count(Destination, RowKey, ColumnParent, SlicePredicate, ConsistencyLevel) ->
+    route_call(Destination, {get_count, RowKey, ColumnParent, SlicePredicate,
                            ConsistencyLevel}, ?POOL_TIMEOUT).
 
 %% @doc Count columns based on a slice and a list of rows
 %%      WARNING: NOT O(1)
--spec multiget_count(server_ref(), [row_key()], column_parent(), slice_predicate(), consistency_level()) -> response().
-multiget_count(ServerRef, RowKeys, ColumnParent, SlicePredicate, ConsistencyLevel) when is_list(RowKeys) ->
-    route_call(ServerRef, {multiget_count, RowKeys, ColumnParent, SlicePredicate,
+-spec multiget_count(destination(), [row_key()], column_parent(), slice_predicate(), consistency_level()) -> response().
+multiget_count(Destination, RowKeys, ColumnParent, SlicePredicate, ConsistencyLevel) when is_list(RowKeys) ->
+    route_call(Destination, {multiget_count, RowKeys, ColumnParent, SlicePredicate,
                            ConsistencyLevel}, ?POOL_TIMEOUT).
 
 %% @doc Get a list of slices for the keys within the specified KeyRange
--spec get_range_slices(server_ref(),  column_parent(), slice_predicate(), key_range(), consistency_level()) -> response().
-get_range_slices(ServerRef, ColumnParent, SlicePredicate, KeyRange, ConsistencyLevel) ->
-    route_call(ServerRef, {get_range_slices, ColumnParent, SlicePredicate, KeyRange,
+-spec get_range_slices(destination(),  column_parent(), slice_predicate(), key_range(), consistency_level()) -> response().
+get_range_slices(Destination, ColumnParent, SlicePredicate, KeyRange, ConsistencyLevel) ->
+    route_call(Destination, {get_range_slices, ColumnParent, SlicePredicate, KeyRange,
                            ConsistencyLevel}, ?POOL_TIMEOUT).
 
 %% @doc Get a list of slices using IndexRange
--spec get_indexed_slices(server_ref(),  column_parent(), slice_predicate(), key_range(), consistency_level()) -> response().
-get_indexed_slices(ServerRef, ColumnParent, IndexClause, SlicePredicate, ConsistencyLevel) ->
-    route_call(ServerRef, {get_indexed_slices, ColumnParent, IndexClause, SlicePredicate,
+-spec get_indexed_slices(destination(),  column_parent(), slice_predicate(), key_range(), consistency_level()) -> response().
+get_indexed_slices(Destination, ColumnParent, IndexClause, SlicePredicate, ConsistencyLevel) ->
+    route_call(Destination, {get_indexed_slices, ColumnParent, IndexClause, SlicePredicate,
                            ConsistencyLevel}, ?POOL_TIMEOUT).
 
 %% @doc Execute a CQL query
@@ -363,72 +363,72 @@ execute_prepared_cql_query(CqlPool, CqlQuery, Values) when is_integer(CqlQuery),
 %% @doc Get the Thrift API version
 -spec describe_version() -> response().
 describe_version() ->
-    describe_version(?DEFAULT_POOL_NAME).
+    describe_version(?DEFAULT_KEYSPACE).
 
 %% @doc Get the Thrift API version
--spec describe_version(server_ref()) -> response().
-describe_version(ServerRef) ->
-    route_call(ServerRef, {describe_version}, ?POOL_TIMEOUT).
+-spec describe_version(destination()) -> response().
+describe_version(Destination) ->
+    route_call(Destination, {describe_version}, ?POOL_TIMEOUT).
 
 %% @doc Get the snitch used for the cluster
 -spec describe_snitch() -> response().
 describe_snitch() ->
-    describe_snitch(?DEFAULT_POOL_NAME).
+    describe_snitch(?DEFAULT_KEYSPACE).
 
 %% @doc Get the Thrift API snitch
 -spec describe_snitch(keyspace()) -> response().
-describe_snitch(ServerRef) ->
-    route_call(ServerRef, {describe_snitch}, ?POOL_TIMEOUT).
+describe_snitch(Destination) ->
+    route_call(Destination, {describe_snitch}, ?POOL_TIMEOUT).
 
 %% @doc Get the partitioner used for the cluster
 -spec describe_partitioner() -> response().
 describe_partitioner() ->
-    describe_partitioner(?DEFAULT_POOL_NAME).
+    describe_partitioner(?DEFAULT_KEYSPACE).
 
 %% @doc Get the Thrift API partitioner
 -spec describe_partitioner(keyspace()) -> response().
-describe_partitioner(ServerRef) ->
-    route_call(ServerRef, {describe_partitioner}, ?POOL_TIMEOUT).
+describe_partitioner(Destination) ->
+    route_call(Destination, {describe_partitioner}, ?POOL_TIMEOUT).
 
 %% @doc Get the schema_versions used for the cluster
 -spec describe_schema_versions() -> response().
 describe_schema_versions() ->
-    describe_schema_versions(?DEFAULT_POOL_NAME).
+    describe_schema_versions(?DEFAULT_KEYSPACE).
 
 %% @doc Get the Thrift API schema_versions
 -spec describe_schema_versions(keyspace()) -> response().
-describe_schema_versions(ServerRef) ->
-    route_call(ServerRef, {describe_schema_versions}, ?POOL_TIMEOUT).
+describe_schema_versions(Destination) ->
+    route_call(Destination, {describe_schema_versions}, ?POOL_TIMEOUT).
 
 %% @doc Get the cluster_name 
 -spec describe_cluster_name() -> response().
 describe_cluster_name() ->
-    describe_cluster_name(?DEFAULT_POOL_NAME).
+    describe_cluster_name(?DEFAULT_KEYSPACE).
 
 %% @doc Get the Thrift API cluster_name
 -spec describe_cluster_name(keyspace()) -> response().
-describe_cluster_name(ServerRef) ->
-    route_call(ServerRef, {describe_cluster_name}, ?POOL_TIMEOUT).
+describe_cluster_name(Destination) ->
+    route_call(Destination, {describe_cluster_name}, ?POOL_TIMEOUT).
 
 
 %% @doc Get the list of all the keyspaces
 -spec describe_keyspaces() -> response().
 describe_keyspaces() ->
-    describe_keyspaces(?DEFAULT_POOL_NAME).
+    describe_keyspaces(?DEFAULT_KEYSPACE).
 
 %% @doc Get the Thrift API keyspaces
 -spec describe_keyspaces(keyspace()) -> response().
-describe_keyspaces(ServerRef) ->
-    route_call(ServerRef, {describe_keyspaces}, ?POOL_TIMEOUT).
+describe_keyspaces(Destination) ->
+    route_call(Destination, {describe_keyspaces}, ?POOL_TIMEOUT).
 
 %% @doc Gets the token ring; a map of ranges to host addresses
 -spec describe_ring(keyspace()) -> response().
 describe_ring(Keyspace) ->
     describe_ring(Keyspace, Keyspace).
 
--spec describe_ring(server_ref(), keyspace()) -> response().
-describe_ring(ServerRef, Keyspace) ->
-    route_call(ServerRef, {describe_ring, [Keyspace]}, ?POOL_TIMEOUT).
+-spec describe_ring(destination(), keyspace()) -> response().
+describe_ring(Destination, Keyspace) ->
+    route_call(Destination, {describe_ring, [Keyspace]}, ?POOL_TIMEOUT).
 
 -spec timestamp() -> integer().
 timestamp() ->
@@ -519,8 +519,8 @@ key_range(StartKey, EndKey) ->
 
 init([ConnectionOptions0]) ->
     {Keyspace1, ConnectionOptions2} = 
-    case lists:keytake(pool_name, 1, ConnectionOptions0) of
-        {value, {pool_name, Keyspace0}, ConnectionOptions1} -> 
+    case lists:keytake(keyspace, 1, ConnectionOptions0) of
+        {value, {keyspace, Keyspace0}, ConnectionOptions1} -> 
             {Keyspace0, ConnectionOptions1};
         false ->
             {?DEFAULT_KEYSPACE, ConnectionOptions0}
@@ -642,37 +642,40 @@ do_request(Connection, {Function, Args}, _State) ->
             end
     end.
 
-%% @doc Send the request to either poolboy, or the gen_server
--spec route_call(server_ref(), tuple(), timeout()) -> response().
-route_call(Keyspace, Command = {_Function}, Timeout) when is_binary(Keyspace) ->
-    pool_call(Keyspace, Command, Timeout);
-route_call(Keyspace, Command = {_Function, _A1}, Timeout) when is_binary(Keyspace) ->
-    pool_call(Keyspace, Command, Timeout);
-route_call(Keyspace, Command = {_Function, _A1, _A2}, Timeout) when is_binary(Keyspace) ->
-    pool_call(Keyspace, Command, Timeout);
-route_call(Keyspace, Command = {_Function, _A1, _A2, _A3}, Timeout) when is_binary(Keyspace) ->
-    pool_call(Keyspace, Command, Timeout);
-route_call(Keyspace, Command = {_Function, _A1, _A2, _A3, _A4}, Timeout) when is_binary(Keyspace) ->
-    pool_call(Keyspace, Command, Timeout);
-
-% Doubled list because of the Poolboy double routing
-route_call(ServerRef, Command = {_Function}, Timeout) ->
-    gen_server:call(get_target(ServerRef), Command, Timeout);
-route_call(ServerRef, {Function, [[A1]]}, Timeout) ->
+%% @doc Send the request to the gen_server
+-spec route_call(destination(), tuple(), timeout()) -> response().
+% When this comes back from Poolboy, ServerRef is a pid
+%       optionally, atom for internal testing
+route_call(ServerRef, Command = {_Function}, Timeout) when is_atom(ServerRef); is_pid(ServerRef) ->
+    gen_server:call(ServerRef, Command, Timeout);
+route_call(ServerRef, {Function, [[A1]]}, Timeout) when is_atom(ServerRef); is_pid(ServerRef) ->
     route_call(ServerRef, {Function, [A1]}, Timeout);
-route_call(ServerRef, {Function, [A1]}, Timeout) ->
+route_call(ServerRef, {Function, [A1]}, Timeout) when is_atom(ServerRef); is_pid(ServerRef) ->
     route_call(ServerRef, {Function, A1}, Timeout);
-route_call(ServerRef, Command = {_Function, _A1}, Timeout) ->
-    gen_server:call(get_target(ServerRef), Command, Timeout);
-route_call(ServerRef, Command = {_Function, _A1, _A2}, Timeout) ->
-    gen_server:call(get_target(ServerRef), Command, Timeout);
-route_call(ServerRef, Command = {_Function, _A1, _A2, _A3}, Timeout) ->
-    gen_server:call(get_target(ServerRef), Command, Timeout);
-route_call(ServerRef, Command = {_Function, _A1, _A2, _A3, _A4}, Timeout) ->
-    gen_server:call(get_target(ServerRef), Command, Timeout).
+route_call(ServerRef, Command = {_Function, _A1}, Timeout) when is_atom(ServerRef); is_pid(ServerRef) ->
+    gen_server:call(ServerRef, Command, Timeout);
+route_call(ServerRef, Command = {_Function, _A1, _A2}, Timeout) when is_atom(ServerRef); is_pid(ServerRef) ->
+    gen_server:call(ServerRef, Command, Timeout);
+route_call(ServerRef, Command = {_Function, _A1, _A2, _A3}, Timeout) when is_atom(ServerRef); is_pid(ServerRef) ->
+    gen_server:call(ServerRef, Command, Timeout);
+route_call(ServerRef, Command = {_Function, _A1, _A2, _A3, _A4}, Timeout) when is_atom(ServerRef); is_pid(ServerRef) ->
+    gen_server:call(ServerRef, Command, Timeout);
+%% @doc Send the request to poolboy
+route_call(Destination, Command = {_Function}, Timeout) ->
+    pool_call(fq_server_ref(Destination), Command, Timeout);
+route_call(Destination, Command = {_Function, _A1}, Timeout) ->
+    pool_call(fq_server_ref(Destination), Command, Timeout);
+route_call(Destination, Command = {_Function, _A1, _A2}, Timeout) ->
+    pool_call(fq_server_ref(Destination), Command, Timeout);
+route_call(Destination, Command = {_Function, _A1, _A2, _A3}, Timeout) ->
+    pool_call(fq_server_ref(Destination), Command, Timeout);
+route_call(Destination, Command = {_Function, _A1, _A2, _A3, _A4}, Timeout) ->
+    pool_call(fq_server_ref(Destination), Command, Timeout).
 
-pool_call(PoolName, Command, Timeout) ->
-    PoolId = registered_pool_name(PoolName),
+
+-spec pool_call(fq_server_ref(), tuple(), timeout()) ->response().
+pool_call(FqServerRef, Command, Timeout) ->
+    PoolId = registered_pool_name(FqServerRef),
     TransactionFun = fun() ->
             poolboy:transaction(PoolId, fun(Worker) ->
                         gen_server:call(Worker, Command, Timeout)
@@ -682,15 +685,19 @@ pool_call(PoolName, Command, Timeout) ->
     % If the pool doesnt' exist, the keyspace has not been set before
     catch
         exit:{noproc, _} ->
-            start_pool(PoolName),
+            start_pool(FqServerRef),
             TransactionFun()
     end.
 
-    
-%% @doc Get the target for the server_ref
--spec get_target(server_ref()) -> target().
-get_target(ServerRef) when is_pid(ServerRef) ->
-    ServerRef;
-get_target(ServerRef) when is_atom(ServerRef) ->
-    ServerRef.
+%% @doc Fully qualify a server ref w/ a thrift host/port
+-spec fq_server_ref(destination()) -> fq_server_ref().
+fq_server_ref({_, _, _} = Destination) -> Destination;
+fq_server_ref(Destination) when is_binary(Destination) -> {undefined, undefined, Destination}.
 
+%% If thrift host is passed in, use it
+binary_host(Host) when is_list(Host) -> list_to_binary(Host);
+binary_host(undefined) -> <<"">>.
+
+%% If thrift port is passed in, use it
+binary_port(Port) when is_integer(Port) -> list_to_binary(integer_to_list(Port));
+binary_port(undefined) -> <<"">>.

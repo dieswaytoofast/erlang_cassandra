@@ -36,8 +36,7 @@ start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 -spec start_pool(pool_name(), params(), params()) -> supervisor:startchild_ret().
-start_pool(PoolName, PoolOptions, ConnectionOptions) when is_binary(PoolName),
-                                                          is_list(PoolOptions),
+start_pool(PoolName, PoolOptions, ConnectionOptions) when is_list(PoolOptions),
                                                           is_list(ConnectionOptions) ->
     PoolSpec = pool_spec(PoolName, PoolOptions, ConnectionOptions),
     supervisor:start_child(?SERVER, PoolSpec).
@@ -59,7 +58,7 @@ init([]) ->
 
     SupFlags = {RestartStrategy, MaxRestarts, MaxSecondsBetweenRestarts},
 
-    PoolName = application:get_env(erlang_cassandra, pool_name, ?DEFAULT_POOL_NAME),
+    Keyspace = application:get_env(erlang_cassandra, keyspace, ?DEFAULT_KEYSPACE),
     % We need this to be a one_for_one supervisor, because of the way the 
     % connection_options trickle through to the workers (and hence, our
     % gen-server).  To simplify things, I start a default pool of size 0. This
@@ -72,16 +71,25 @@ init([]) ->
     PoolOptions = application:get_env(erlang_cassandra, pool_options, [{size, 0},
                                                         {max_overflow, 10}]),
     ConnectionOptions = application:get_env(erlang_cassandra, connection_options, []),
-    PoolSpecs = pool_spec(PoolName, PoolOptions, [{set_keyspace, false} | ConnectionOptions]),
+    PoolSpecs = pool_spec({undefined, undefined, Keyspace}, PoolOptions, [{set_keyspace, false} | ConnectionOptions]),
     {ok, {SupFlags, [PoolSpecs]}}.
 
 
 -spec pool_spec(pool_name(), params(), params()) -> supervisor:child_spec().
-pool_spec(PoolName, PoolOptions, ConnectionOptions) ->
+pool_spec({Host, Port, Keyspace} = PoolName, PoolOptions, ConnectionOptions) ->
     PoolId = erlang_cassandra:registered_pool_name(PoolName),
     PoolArgs = [{name, {local, PoolId}},
                 {worker_module, erlang_cassandra_poolboy_worker}] ++ PoolOptions,
+    ConnectionArgs = thrift_host(Host) ++ 
+                     thrift_port(Port) ++ 
+                     keyspace(Keyspace) ++ ConnectionOptions,
     % Pass in pool_name to the connection_options since this is also the
     %   keyspace, and is needed by init/1
-    poolboy:child_spec(PoolId, PoolArgs, [{pool_name, PoolName} |ConnectionOptions]).
+    poolboy:child_spec(PoolId, PoolArgs, ConnectionArgs).
+
+keyspace(Keyspace) when is_binary(Keyspace) -> [{keyspace, Keyspace}].
+thrift_host(undefined) -> [];
+thrift_host(Host) when is_list(Host) -> [{thrift_host, Host}].
+thrift_port(undefined) -> [];
+thrift_port(Port) when is_integer(Port) -> [{thrift_port, Port}].
 

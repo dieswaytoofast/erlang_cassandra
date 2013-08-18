@@ -17,6 +17,8 @@
 -type method()          :: atom().
 -type request()         :: {atom(), [tuple()]} | error().
 -type response()        :: {ok, any()} | error().
+-type thrift_host()     :: undefined | string().
+-type thrift_port()     :: undefined | integer().
 -type connection()      :: any().
 -type node_name()       :: binary().
 -type index()           :: binary().
@@ -25,10 +27,12 @@
 -type doc()             :: binary().
 -type params()          :: [tuple()].
 -type client_name()     :: binary().
--type pool_name()       :: binary().
 -type registered_client_name() :: atom().
 -type registered_pool_name()   :: atom().
--type server_ref()      :: atom() | pid() | client_name() | {pool, pool_name()}.
+-type server_ref()      :: atom() | pid() | client_name().
+-type fq_server_ref()   :: {thrift_host(), thrift_port(), server_ref()}.
+-type destination()     :: server_ref() | fq_server_ref().
+-type pool_name()       :: binary() | fq_server_ref().
 -type target()          :: atom() | pid().
 
 
@@ -61,11 +65,10 @@
 -type compression()     :: binary().
 
 %% Defaults
--define(DEFAULT_KEYSPACE, <<"undefined">>).
+-define(DEFAULT_KEYSPACE, <<"default_erlang_cassandra_keyspace">>).
 -define(DEFAULT_THRIFT_HOST, "localhost").
 -define(DEFAULT_THRIFT_PORT, 9160).
 -define(DEFAULT_THRIFT_OPTIONS, [{framed, true}]).
--define(DEFAULT_POOL_NAME, <<"default_erlang_cassandra_pool">>).
 -define(DEFAULT_POOL_OPTIONS, [{size, 5},
                                {max_overflow, 10}
                               ]).
