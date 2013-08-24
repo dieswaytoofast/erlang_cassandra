@@ -676,7 +676,7 @@ keyspace_and_column_family_definition_item() ->
          {Keyspace, erlang_cassandra:column_family_definition(Keyspace, ColumnFamily)}).
 
 column_parent_item() ->
-    ?LET({ColumnFamily, SuperColumn}, {column_family_word(),
+    ?LET({ColumnFamily, _SuperColumn}, {column_family_word(),
                                        super_column_word()},
 %         erlang_cassandra:column_parent(ColumnFamily, SuperColumn)).
          erlang_cassandra:column_parent(ColumnFamily, undefined)).

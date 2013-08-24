@@ -188,18 +188,22 @@ stop_cql_pool(PoolName) ->
 
 
 %% @doc Set the keyspace to be used by the connection
--spec set_keyspace(keyspace()) -> response().
-set_keyspace(Keyspace) ->
-    set_keyspace(Keyspace, Keyspace).
+-spec set_keyspace(destination()) -> response().
+set_keyspace(Keyspace) when is_binary(Keyspace) ->
+    set_keyspace(Keyspace, Keyspace);
+set_keyspace({_Host, _Port, Keyspace} = Destination) ->
+    set_keyspace(Destination, Keyspace).
 
 -spec set_keyspace(destination(), keyspace()) -> response().
 set_keyspace(Destination, Keyspace) ->
     route_call(Destination, {set_keyspace, [Keyspace]}, ?POOL_TIMEOUT).
 
 %% @doc Describe the keyspace used by the connection
--spec describe_keyspace(keyspace()) -> response().
-describe_keyspace(Keyspace) ->
-    describe_keyspace(Keyspace, Keyspace).
+-spec describe_keyspace(destination()) -> response().
+describe_keyspace(Keyspace) when is_binary(Keyspace) ->
+    describe_keyspace(Keyspace, Keyspace);
+describe_keyspace({_Host, _Port, Keyspace} = Destination) ->
+    describe_keyspace(Destination, Keyspace).
 
 -spec describe_keyspace(destination(), keyspace()) -> response().
 describe_keyspace(Destination, Keyspace) ->
@@ -225,9 +229,11 @@ system_update_keyspace(Destination, KeyspaceDefinition) ->
     route_call(Destination, {system_update_keyspace, KeyspaceDefinition}, ?POOL_TIMEOUT).
 
 %% @doc Remove a keyspace
--spec system_drop_keyspace(keyspace()) -> response().
-system_drop_keyspace(Keyspace) ->
-    system_drop_keyspace(?DEFAULT_KEYSPACE, Keyspace).
+-spec system_drop_keyspace(destination()) -> response().
+system_drop_keyspace(Keyspace) when is_binary(Keyspace) ->
+    system_drop_keyspace(?DEFAULT_KEYSPACE, Keyspace);
+system_drop_keyspace({Host, Port, Keyspace} = _Destination) ->
+    system_drop_keyspace({Host, Port, ?DEFAULT_KEYSPACE}, Keyspace).
 
 -spec system_drop_keyspace(destination(), keyspace()) -> response().
 system_drop_keyspace(Destination, Keyspace) ->
@@ -264,9 +270,9 @@ system_add_column_family(Destination, ColumnFamilyDefinition) ->
     route_call(Destination, {system_add_column_family, ColumnFamilyDefinition}, ?POOL_TIMEOUT).
 
 %% @doc Get the column family definition
--spec system_describe_column_family(keyspace(), column_family()) -> response().
-system_describe_column_family(Keyspace, ColumnFamily) ->
-    {ok, KeyspaceDefinition} = describe_keyspace(Keyspace),
+-spec system_describe_column_family(destination(), column_family()) -> response().
+system_describe_column_family(Destination, ColumnFamily) ->
+    {ok, KeyspaceDefinition} = describe_keyspace(Destination),
     Result = 
     case lists:keyfind(ColumnFamily, #cfDef.name, KeyspaceDefinition#ksDef.cf_defs) of
         false -> undefined;
@@ -422,9 +428,11 @@ describe_keyspaces(Destination) ->
     route_call(Destination, {describe_keyspaces}, ?POOL_TIMEOUT).
 
 %% @doc Gets the token ring; a map of ranges to host addresses
--spec describe_ring(keyspace()) -> response().
-describe_ring(Keyspace) ->
-    describe_ring(Keyspace, Keyspace).
+-spec describe_ring(destination()) -> response().
+describe_ring(Keyspace) when is_binary(Keyspace) ->
+    describe_ring(Keyspace, Keyspace);
+describe_ring({_Host, _Port, Keyspace} = Destination) ->
+    describe_ring(Destination, Keyspace).
 
 -spec describe_ring(destination(), keyspace()) -> response().
 describe_ring(Destination, Keyspace) ->
@@ -584,12 +592,15 @@ code_change(_OldVsn, State, _Extra) ->
 connection(ConnectionOptions) ->
     ThriftHost = proplists:get_value(thrift_host, ConnectionOptions, ?DEFAULT_THRIFT_HOST),
     ThriftPort = proplists:get_value(thrift_port, ConnectionOptions, ?DEFAULT_THRIFT_PORT),
-    ThriftOptions = case lists:keyfind(thrift_options, 1, ConnectionOptions) of
+    ThriftOptions1 = case lists:keyfind(thrift_options, 1, ConnectionOptions) of
         {thrift_options, Options} -> Options;
         false -> ?DEFAULT_THRIFT_OPTIONS
     end,
+    % Require framing to be true
+    ThriftOptions2 = lists:keydelete(framed, 1, ThriftOptions1),
+    ThriftOptions3 = [{framed, true} | ThriftOptions2],
     try
-        {ok, Connection} = thrift_client_util:new(ThriftHost, ThriftPort, cassandra_thrift, ThriftOptions),
+        {ok, Connection} = thrift_client_util:new(ThriftHost, ThriftPort, cassandra_thrift, ThriftOptions3),
         Connection
     catch
         _:_ -> undefined
@@ -691,7 +702,9 @@ pool_call(FqServerRef, Command, Timeout) ->
 
 %% @doc Fully qualify a server ref w/ a thrift host/port
 -spec fq_server_ref(destination()) -> fq_server_ref().
-fq_server_ref({_, _, _} = Destination) -> Destination;
+fq_server_ref({Host, Port, Name}) when is_list(Name) -> {Host, Port, list_to_binary(Name)};
+fq_server_ref({Host, Port, Name}) when is_binary(Name) -> {Host, Port, Name};
+fq_server_ref(Destination) when is_list(Destination) -> {undefined, undefined, list_to_binary(Destination)};
 fq_server_ref(Destination) when is_binary(Destination) -> {undefined, undefined, Destination}.
 
 %% If thrift host is passed in, use it
