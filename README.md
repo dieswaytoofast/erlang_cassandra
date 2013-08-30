@@ -6,9 +6,9 @@ Erlang thrift interface to Cassandra
 - This is just a tiny shim on the  complete list of (current) cassandra thrift commands, as [listed here](http://wiki.apache.org/cassandra/API10)
   - Yes, the returned data has all sorts of records in it. Sorry. Like I said, its a shim
 
-- ```CQL``` commands can be sent using the ```execute_cql_command```, ```prepare_cql_command```, and ```execute_prepared_cql_command``` metnds
+- Keyspaces correspond to [poolboy](https://github.com/devinus/poolboy) pools which are automagically started for you.  These pools are garbage-collected when  the keyspace is deleted (or the application is restarted).
 
-- pools are garbage-collected when  the keyspace is deleted (or the application is restarted)
+- ```CQL``` commands can be sent using the ```execute_cql_command```, ```prepare_cql_command```, and ```execute_prepared_cql_command``` methods.  Note that if you are using prepared cql commands, you will need to expliclty start a cql_pool and reference it (these have one and only one worker). Check out ```start_cql_pool/1``` for more info.
 
 
 Liberally takes ideas from
