@@ -16,7 +16,7 @@ Liberally takes ideas from
 
 ***NOTE***
 
-There is a one-to-one mapping between keyspaces and pools. If you want something other than the default number of workers for a given keyspace, use ```start_pool``` *first*, and *then* access the keyspace, i.e.
+There is a one-to-one mapping between keyspaces and pools. If you want something other than the default number of workers for a given keyspace, use ```start_pool``` *first*, and *then* access the keyspace.
 
 HOWTO
 ============
@@ -28,4 +28,4 @@ erlang_cassandra@paglierino)1> erlang_cassandra:start().
 ```  
 3. Take a look at the exports in ```erlang_cassara.erl```.  In general, whenever you reference a Keyspace (e.g. ```insert(Keyspace, RowKey, ColumnParent, Column, ConsistencyLevel)```), you can use a **Destination** instead of a **Keyspace**.
 A Destination is simply a triplet, i.e., ```{Host, Port, Keyspace}``` (this is relevant for when you might be running multiple Cassandra instances, though lord knows why you would do that). So, you would say ```insert({Host, Port, Keyspace}, RowKey, ColumnParent, Column, ConsistencyLevel)```
-4. For all the thrift commands that _don't_ take a Keyspace (e.g. ```system_update_keyspace```) you can either let the application deduce the Keyspace from the command, or you can explicitly specific it yourself.  e.g. both ```system_update_keyspace(KeyspaceDefinition)```,  ```system_update_keyspace(Keyspace, KeyspaceDefinition)``` and ```system_update_keyspace({Host, Port, Keyspace}, KeyspaceDefinition)``` are acceptable
+4. For all the thrift commands that _don't_ take a Keyspace (e.g. ```system_update_keyspace```) you can either let the application deduce the Keyspace from the command, or you can explicitly specific it yourself.  e.g. any of ```system_update_keyspace(KeyspaceDefinition)```,  ```system_update_keyspace(Keyspace, KeyspaceDefinition)``` and ```system_update_keyspace({Host, Port, Keyspace}, KeyspaceDefinition)``` are acceptable
