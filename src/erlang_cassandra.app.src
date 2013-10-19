@@ -21,9 +21,10 @@
                   compiler,
                   syntax_tools,
                   sasl,
-                  lager,
+%                  lager,
                   poolboy,
-                  reltool_util
+                  reltool_util,
+                  thrift
                  ]},
   {mod, {erlang_cassandra_app, []}},
   {env, []}
