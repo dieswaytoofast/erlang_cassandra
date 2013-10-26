@@ -67,6 +67,9 @@ Misc
    * In general, whenever you reference a Keyspace (e.g. ```insert(Keyspace, RowKey, ColumnParent, Column, ConsistencyLevel)```), you can use a **Destination** instead of a **Keyspace**.
    * A Destination is simply a triplet, i.e., ```{Host, Port, Keyspace}``` (this is relevant for when you might be running multiple Cassandra instances, though lord knows why you would do that).
    * As such, you could also use ```insert({Host, Port, Keyspace}, RowKey, ColumnParent, Column, ConsistencyLevel)```
+   * If you are relying on **Destination**, _always pass in the **Destination** in your commands_. e.g.
+       * instead of ```erlang_cassandra:set_keyspace(<<"bar">>).```, use
+       * ```erlang_cassandra:set_keyspace({Host, Port, <<"bar">>}, <<"bar">>).```
    
 *  For all the thrift commands that _don't_ take a Keyspace (e.g. ```system_update_keyspace```) you can either let the application deduce the Keyspace from the command, or you can explicitly specific it yourself.  e.g. any of the following are acceptable
 
