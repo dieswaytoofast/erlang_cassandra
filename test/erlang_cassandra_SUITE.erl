@@ -41,7 +41,7 @@ suite() ->
     [{ct_hooks,[cth_surefire]}, {timetrap,{seconds,320}}].
 
 init_per_suite(Config) ->
-%    setup_lager(),
+    setup_lager(),
     setup_environment(),
     Config.
 
@@ -151,7 +151,8 @@ groups() ->
                 t_remove_counter
          ]},
         {test, [],
-         [      t_describe_keyspace
+         [      
+                t_describe_keyspace
          ]},
         {cql, [{repeat, 3}],
          [
@@ -770,9 +771,9 @@ setup_lager() ->
 start(Config) ->
     ConnectionOptions = ?config(connection_options, Config),
     PoolOptions = ?config(pool_options, Config),
-    reltool_util:application_start(erlang_cassandra),
     application:set_env(erlang_cassandra, pool_options, PoolOptions),
     application:set_env(erlang_cassandra, connection_options, ConnectionOptions),
+    reltool_util:application_start(erlang_cassandra),
     % Eliminate the test keyspaces at start
     cleanup_keyspaces(),
     Config.
