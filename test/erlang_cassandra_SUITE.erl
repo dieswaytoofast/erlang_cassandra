@@ -67,12 +67,21 @@ pool_options(_) ->
     [{size, 7},
      {max_overflow, 14}].
 
+retry_options(1) ->
+    [];
+retry_options(2) ->
+    [{retry_interval, 500}];
+retry_options(_) ->
+    [{retry_interval, 500},
+     {retry_amount, 5}].
+
 update_config(Config) ->
     Version = cassandra_test_version(Config),
     Config1 = lists:foldl(fun(X, Acc) -> 
                     proplists:delete(X, Acc)
             end, Config, [cassandra_test_version,
                           pool_options,
+                          retry_options,
                           keyspace]),
     [{cassandra_test_version, Version + 1} | Config1].
 
@@ -94,10 +103,12 @@ init_per_group(_GroupName, Config) ->
     Version = cassandra_test_version(Config1),
     PoolOptions = pool_options(Version),
     ConnectionOptions = connection_options(),
+    RetryOptions = retry_options(Version),
 
     Config2 = [{keyspace, Keyspace},
                {pool_options, PoolOptions},
-               {connection_options, ConnectionOptions} | Config1],
+               {connection_options, ConnectionOptions ++ RetryOptions} 
+               | Config1],
     start(Config2),
     Config2.
 
