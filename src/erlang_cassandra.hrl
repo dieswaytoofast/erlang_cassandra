@@ -10,7 +10,7 @@
 %%% retrieved from: http://www.opensource.org/licenses/bsd-license.php
 %%%-------------------------------------------------------------------
 
--include("cassandra_types.hrl").
+-include("erlang_cassandra_types.hrl").
 
 
 -type error()           :: {error, Reason :: term()}.
