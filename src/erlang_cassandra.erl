@@ -634,7 +634,7 @@ connection(ConnectionOptions) ->
     ThriftOptions2 = lists:keydelete(framed, 1, ThriftOptions1),
     ThriftOptions3 = [{framed, true} | ThriftOptions2],
     try
-        {ok, Connection} = thrift_client_util:new(ThriftHost, ThriftPort, cassandra_thrift, ThriftOptions3),
+        {ok, Connection} = thrift_client_util:new(ThriftHost, ThriftPort, erlang_cassandra_thrift, ThriftOptions3),
         Connection
     catch
         _:_ -> undefined
